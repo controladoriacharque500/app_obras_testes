@@ -7,10 +7,10 @@ from gspread.exceptions import WorksheetNotFound
 import streamlit_authenticator as stauth 
 import yaml
 from yaml.loader import SafeLoader
-import time # Importado para uso no `get_all_values`
+import time 
 
 # --- Configurações da Nova Planilha ---
-PLANILHA_NOME = "Controle_Obras_testes" # O nome da sua nova planilha
+PLANILHA_NOME = "Controle_Obras_testes" 
 ABA_INFO = "Obras_Info"
 ABA_DESPESAS = "Despesas_Semanas"
 ABA_USUARIOS = "Usuarios"
@@ -52,7 +52,6 @@ def get_gspread_client():
 
 # --- Funções de Leitura de Dados (Banco de Dados) ---
 
-# CORREÇÃO CRÍTICA 1: Tratamento de colunas duplicadas
 def get_records_safe(worksheet):
     """Lê todos os dados de uma aba com tratamento de erros para colunas duplicadas."""
     try:
@@ -61,9 +60,8 @@ def get_records_safe(worksheet):
         return df
     except Exception as e:
         if "the header row in the worksheet contains duplicates" in str(e):
-            st.warning(f"Atenção: A aba '{worksheet.title}' contém colunas duplicadas na primeira linha. Usando 'get_all_values()' como alternativa.")
+            st.warning(f"Atenção: A aba '{worksheet.title}' pode conter colunas duplicadas na primeira linha. Usando 'get_all_values()' como alternativa.")
             
-            # Se houver duplicatas, lê todos os valores e usa a primeira linha como cabeçalho
             all_values = worksheet.get_all_values()
             if not all_values:
                 return pd.DataFrame()
@@ -71,20 +69,19 @@ def get_records_safe(worksheet):
             header = all_values[0]
             data = all_values[1:]
             
-            # CORREÇÃO: Remove colunas duplicadas no cabeçalho (mantém a primeira ocorrência)
+            # Remove/Renomeia colunas duplicadas no cabeçalho
             clean_header = []
             seen = set()
             for col in header:
-                if col not in seen and col: # Ignora colunas vazias
+                if col not in seen and col: 
                     clean_header.append(col)
                     seen.add(col)
                 elif col:
-                     # Renomeia se a coluna for duplicada
                     new_col_name = f"{col}_DUP_{len([c for c in clean_header if c.startswith(col)])}"
                     clean_header.append(new_col_name)
                     seen.add(new_col_name)
             
-            df = pd.DataFrame(data, columns=clean_header)
+            df = pd.DataFrame(data, columns=clean_header[:len(data[0])]) # Limita as colunas se necessário
             return df
         else:
             raise e
@@ -107,14 +104,12 @@ def load_data():
         df_despesas = get_records_safe(aba_despesas)
 
         # =========================================================================
-        # CORREÇÃO CRÍTICA 2: Tratamento de Obra_ID formatado (ex: '001')
+        # CORREÇÃO CRÍTICA 1: Tratamento do Obra_ID como INTEIRO DENTRO DO PYTHON
         # =========================================================================
         
         if not df_info.empty and 'Obra_ID' in df_info.columns:
-            # Garante que ID é uma string, limpa espaços e preenche vazios para '0'
-            df_info['Obra_ID'] = df_info['Obra_ID'].astype(str).str.strip().replace('', '0')
-            # Converte para int para encontrar o máximo, e volta para str para comparação
-            # Não fazemos to_numeric aqui, tratamos como string de ID formatado
+            # Converte Obra_ID para INT, coerça erros para NaN, preenche NaN com 0
+            df_info['Obra_ID'] = pd.to_numeric(df_info['Obra_ID'], errors='coerce').fillna(0).astype(int)
             
             if 'Valor_Total_Inicial' in df_info.columns: 
                 df_info['Valor_Total_Inicial'] = pd.to_numeric(df_info['Valor_Total_Inicial'], errors='coerce')
@@ -124,11 +119,11 @@ def load_data():
                 df_info['Valor_Total_Inicial'] = 0.0
 
         if not df_despesas.empty and 'Obra_ID' in df_despesas.columns:
-            # Garante que ID é uma string
-            df_despesas['Obra_ID'] = df_despesas['Obra_ID'].astype(str).str.strip().replace('', '0')
+            # Converte Obra_ID para INT, coerça erros para NaN, preenche NaN com 0
+            df_despesas['Obra_ID'] = pd.to_numeric(df_despesas['Obra_ID'], errors='coerce').fillna(0).astype(int)
             
             if 'Gasto_Semana' in df_despesas.columns: 
-                # CORREÇÃO: Sempre converte para float para evitar erro 'int64' na escrita se não for String
+                # Garante que é float para evitar erro de serialização int64, mas o uso é numérico.
                 df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce')
             if 'Semana_Ref' in df_despesas.columns:
                  df_despesas['Semana_Ref'] = pd.to_numeric(df_despesas['Semana_Ref'], errors='coerce').fillna(0).astype(int)
@@ -149,7 +144,7 @@ def load_data():
 # --- Funções de Escrita de Dados (INSERT E UPDATE) ---
 
 def insert_new_obra(data):
-    """Insere uma nova obra na aba Obras_Info, mantendo o formato de string (001, 002)."""
+    """Insere uma nova obra na aba Obras_Info, com ID como número inteiro nativo do Python."""
     gc = get_gspread_client() 
     if not gc: return 
     
@@ -157,10 +152,10 @@ def insert_new_obra(data):
         planilha = gc.open(PLANILHA_NOME)
         aba_info = planilha.worksheet(ABA_INFO)
         
-        # O ID é passado como STRING formatada (ex: '003')
-        # data[0] já deve vir como string formatada da função show_cadastro_obra
+        # CORREÇÃO 2: ID é convertido para INT nativo do Python (data[0] vem como int)
+        data_nativa = [int(data[0]), data[1], float(data[2]), data[3]]
         
-        aba_info.append_row(data, insert_data_option='INSERT_ROWS')
+        aba_info.append_row(data_nativa, insert_data_option='INSERT_ROWS')
         
         st.toast("✅ Nova obra cadastrada com sucesso!")
         load_data.clear()
@@ -168,7 +163,7 @@ def insert_new_obra(data):
         st.error(f"Erro ao inserir nova obra: {e}")
 
 def update_obra_info(obra_id, new_nome, new_valor, new_data_inicio):
-    """Atualiza a obra buscando o ID como string (001) no Sheets."""
+    """Atualiza a obra buscando o ID como número inteiro no Sheets."""
     gc = get_gspread_client()
     if not gc: return 
     
@@ -176,24 +171,27 @@ def update_obra_info(obra_id, new_nome, new_valor, new_data_inicio):
         planilha = gc.open(PLANILHA_NOME)
         aba_info = planilha.worksheet(ABA_INFO)
         
-        # Usamos get_all_values() para buscar o ID como string formatada
         data = aba_info.get_all_values()
         sheets_row_index = -1
+        id_int_para_buscar = int(obra_id) # Garante que o ID é tratado como inteiro
         
         # Procura a linha da Obra_ID
         for i, row in enumerate(data[1:]):
-            # Compara a coluna 0 (Obra_ID) com a string do ID
-            if row and len(row) > 0 and row[0].strip() == str(obra_id).strip(): 
-                sheets_row_index = i + 2 
-                break
+            try:
+                # Compara a coluna 0 (Obra_ID) com o ID inteiro
+                if row and len(row) > 0 and int(float(row[0].strip() or 0)) == id_int_para_buscar: 
+                    sheets_row_index = i + 2 
+                    break
+            except ValueError:
+                continue # Pula linhas com IDs não numéricos
         
         if sheets_row_index == -1:
             st.warning(f"Obra ID {obra_id} não encontrada para atualização.")
             return
 
-        # Novas colunas de dados
+        # CORREÇÃO 3: ID é enviado como INT nativo do Python
         new_row_data = [
-            str(obra_id), # ID como string formatada
+            id_int_para_buscar, 
             str(new_nome),
             float(new_valor), 
             new_data_inicio.strftime('%Y-%m-%d') 
@@ -210,7 +208,7 @@ def update_obra_info(obra_id, new_nome, new_valor, new_data_inicio):
 
 
 def insert_new_despesa(data):
-    """Insere uma nova despesa semanal na aba Despesas_Semanas."""
+    """Insere uma nova despesa semanal na aba Despesas_Semanas, com ID como número inteiro nativo."""
     gc = get_gspread_client() 
     if not gc: return
     
@@ -218,9 +216,8 @@ def insert_new_despesa(data):
         planilha = gc.open(PLANILHA_NOME)
         aba_despesas = planilha.worksheet(ABA_DESPESAS)
         
-        # CORREÇÃO: Garante que os valores são tipos nativos do Python
-        # Obra_ID como STR, Semana_Ref como INT, Gasto como FLOAT
-        data_nativa = [str(data[0]), int(data[1]), data[2], float(data[3])]
+        # CORREÇÃO 4: Obra_ID (int), Semana_Ref (int), Gasto (float) -> Tipos nativos
+        data_nativa = [int(data[0]), int(data[1]), data[2], float(data[3])]
 
         aba_despesas.append_row(data_nativa, insert_data_option='INSERT_ROWS')
         st.toast("✅ Despesa semanal registrada com sucesso!")
@@ -239,22 +236,28 @@ def update_despesa(obra_id, semana_ref, novo_gasto, nova_data):
         data = aba_despesas.get_all_values()
         
         sheets_row_index = -1
+        id_int_para_buscar = int(obra_id) 
 
+        # Procura a linha
         for i, row in enumerate(data[1:]):
-            # Compara Obra_ID como string e Semana_Ref como int
-            if (row and len(row) > 1 and 
-                str(row[0]).strip() == str(obra_id).strip() and 
-                str(row[1]).strip().isdigit() and 
-                int(row[1]) == int(semana_ref)):
-                sheets_row_index = i + 2 
-                break
+            try:
+                # Compara Obra_ID como int e Semana_Ref como int
+                row_obra_id = int(float(row[0].strip() or 0))
+                row_semana_ref = int(float(row[1].strip() or 0))
+                
+                if row_obra_id == id_int_para_buscar and row_semana_ref == int(semana_ref):
+                    sheets_row_index = i + 2 
+                    break
+            except ValueError:
+                 continue
         
         if sheets_row_index == -1:
             st.warning("Linha de despesa não encontrada para atualização.")
             return
 
+        # CORREÇÃO 5: ID é enviado como INT nativo do Python
         new_row_data = [
-            str(obra_id), # ID como string
+            id_int_para_buscar, 
             int(semana_ref),
             nova_data.strftime('%Y-%m-%d'),
             float(novo_gasto)
@@ -280,19 +283,21 @@ def formatar_moeda(x):
 def calcular_status_financeiro(df_info, df_despesas):
     """Função auxiliar para calcular o status financeiro (reutilizada no relatório)"""
     
-    # CORREÇÃO: Verificação robusta para evitar KeyError no groupby
+    # Obra_ID é int agora
     if (not df_despesas.empty and 
         'Obra_ID' in df_despesas.columns and 
         'Gasto_Semana' in df_despesas.columns
        ):
         try:
             df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce').fillna(0)
-            df_despesas['Obra_ID'] = df_despesas['Obra_ID'].astype(str)
             
-            # Filtra IDs válidos antes do groupby
+            # Garante que Obra_ID é inteiro
+            df_despesas['Obra_ID'] = df_despesas['Obra_ID'].astype(int)
+            
             valid_ids = df_despesas[df_despesas['Obra_ID'].isin(df_info['Obra_ID'].unique())]
             
             if not valid_ids.empty:
+                # Agrupa por Obra_ID (int)
                 gastos_totais = valid_ids.groupby('Obra_ID', dropna=False)['Gasto_Semana'].sum().reset_index()
                 gastos_totais.rename(columns={'Gasto_Semana': 'Gasto_Total_Acumulado'}, inplace=True)
             else:
@@ -301,7 +306,6 @@ def calcular_status_financeiro(df_info, df_despesas):
         except Exception as e:
             gastos_totais = pd.DataFrame({'Obra_ID': df_info['Obra_ID'].unique(), 'Gasto_Total_Acumulado': 0.0})
     else:
-        # Cria um DF zerado para evitar merge com erro
         if 'Obra_ID' in df_info.columns:
             gastos_totais = pd.DataFrame({'Obra_ID': df_info['Obra_ID'].unique(), 'Gasto_Total_Acumulado': 0.0})
         else:
@@ -335,17 +339,16 @@ def show_cadastro_obra(df_info):
         next_id = 1
         if not df_info.empty and 'Obra_ID' in df_info.columns:
             try:
-                # CORREÇÃO: Encontra o máximo ID numérico, ignora strings vazias
-                valid_ids = df_info[df_info['Obra_ID'].str.isdigit()]['Obra_ID'].astype(int)
-                max_id = valid_ids.max() if not valid_ids.empty else 0
-                next_id = max_id + 1
+                # Encontra o máximo ID numérico (inteiro)
+                max_id = df_info['Obra_ID'].max()
+                next_id = int(max_id) + 1 if pd.notna(max_id) else 1
             except:
                 next_id = len(df_info) + 1
         
-        # CORREÇÃO CRÍTICA: Formata o ID com zeros à esquerda (ex: 1 -> '001')
-        id_formatado = f"{next_id:03d}"
+        # ID para exibição (string formatada)
+        id_formatado_display = f"{next_id:03d}"
         
-        st.info(f"O próximo ID da Obra será: **{id_formatado}**")
+        st.info(f"O próximo ID da Obra será: **{id_formatado_display}**")
 
         with st.form("form_nova_obra"):
             nome = st.text_input("Nome da Obra", placeholder="Ex: Casa Alpha")
@@ -356,8 +359,8 @@ def show_cadastro_obra(df_info):
             
             if submitted:
                 if nome and valor > 0:
-                    # Passa o ID como a string formatada
-                    data_list = [id_formatado, nome, valor, data_inicio.strftime('%Y-%m-%d')]
+                    # Passa o ID como o INTEIRO
+                    data_list = [next_id, nome, valor, data_inicio.strftime('%Y-%m-%d')]
                     insert_new_obra(data_list)
                 else:
                     st.warning("Preencha todos os campos corretamente.")
@@ -369,9 +372,9 @@ def show_cadastro_obra(df_info):
         if df_info.empty:
             st.info("Nenhuma obra cadastrada para editar.")
         else:
-            # CORREÇÃO: Garante que as chaves são únicas e usa Obra_ID como string
-            opcoes_obras = {f"{row['Nome_Obra']} ({row['Obra_ID']})": row['Obra_ID'] 
-                            for index, row in df_info.iterrows() if row['Obra_ID'].strip()}
+            # ID é tratado como INT no DataFrame, mas exibido como string formatada
+            opcoes_obras = {f"{row['Nome_Obra']} ({row['Obra_ID']:03d})": row['Obra_ID'] 
+                            for index, row in df_info.iterrows() if row['Obra_ID'] > 0}
             
             if not opcoes_obras:
                  st.info("Nenhuma obra com ID válido para editar.")
@@ -389,7 +392,7 @@ def show_cadastro_obra(df_info):
                 data_inicio_actual = obra_data['Data_Inicio'].date() if pd.notna(obra_data['Data_Inicio']) and isinstance(obra_data['Data_Inicio'], datetime) else datetime.today().date()
                 
                 with st.form("form_edicao_obra"):
-                    st.markdown(f"**Editando: Obra {obra_id_para_editar}**")
+                    st.markdown(f"**Editando: Obra {obra_id_para_editar:03d}**")
                     
                     novo_nome = st.text_input("Novo Nome da Obra", 
                                               value=obra_data['Nome_Obra'], 
@@ -421,8 +424,9 @@ def show_registro_despesa(df_info, df_despesas):
         st.warning("Cadastre pelo menos uma obra para registrar despesas.")
         return
 
-    opcoes_obras = {f"{row['Nome_Obra']} ({row['Obra_ID']})": row['Obra_ID']
-                    for index, row in df_info.iterrows() if row['Obra_ID'].strip()}
+    # ID é tratado como INT, mas exibido como string formatada
+    opcoes_obras = {f"{row['Nome_Obra']} ({row['Obra_ID']:03d})": row['Obra_ID']
+                    for index, row in df_info.iterrows() if row['Obra_ID'] > 0}
 
     if not opcoes_obras:
          st.warning("Nenhuma obra com ID válido para registrar despesas.")
@@ -431,18 +435,19 @@ def show_registro_despesa(df_info, df_despesas):
     obra_selecionada_str = st.selectbox("Selecione a Obra:", list(opcoes_obras.keys()), key="select_obra_registro")
 
     if obra_selecionada_str:
-        obra_id = opcoes_obras[obra_selecionada_str]
+        obra_id = opcoes_obras[obra_selecionada_str] # Obra_ID é int
+        obra_id_display = f"{obra_id:03d}"
         
-        # CORREÇÃO: Filtro robusto para evitar KeyError (Obra_ID como STR)
+        # Filtro robusto (Obra_ID como INT)
         if not df_despesas.empty and 'Obra_ID' in df_despesas.columns:
-            despesas_obra = df_despesas[df_despesas['Obra_ID'].astype(str) == str(obra_id)].copy()
+            despesas_obra = df_despesas[df_despesas['Obra_ID'].astype(int) == int(obra_id)].copy()
         else:
             despesas_obra = pd.DataFrame()
         
         col1_reg, col2_edit = st.columns([1, 1.2]) 
 
         with col1_reg:
-            st.subheader(f"Novo Gasto (Obra: {obra_id})")
+            st.subheader(f"Novo Gasto (Obra: {obra_id_display})")
             
             if despesas_obra.empty or 'Semana_Ref' not in despesas_obra.columns:
                 proxima_semana = 1
@@ -459,7 +464,7 @@ def show_registro_despesa(df_info, df_despesas):
                 
                 if submitted:
                     if gasto >= 0:
-                        # Obra_ID (string), Semana_Ref (int), Data (str), Gasto (float)
+                        # Obra_ID (int), Semana_Ref (int), Data (str), Gasto (float)
                         data_list = [obra_id, proxima_semana, data_semana.strftime('%Y-%m-%d'), float(gasto)]
                         insert_new_despesa(data_list)
                     else:
@@ -492,7 +497,6 @@ def show_registro_despesa(df_info, df_despesas):
                     linha_edicao = despesas_obra[despesas_obra['Semana_Ref'] == semana_selecionada].iloc[0]
                     
                     try:
-                        # Tenta converter a string do sheets para data
                         data_atual = datetime.strptime(str(linha_edicao['Data_Semana']), '%Y-%m-%d').date()
                     except:
                          data_atual = datetime.today().date()
@@ -502,7 +506,7 @@ def show_registro_despesa(df_info, df_despesas):
                     with st.expander(f"Editar Detalhes da Semana {semana_selecionada}", expanded=True):
                         with st.form(f"form_edicao_semana_{semana_selecionada}"):
                             
-                            st.markdown(f"**Editando: Obra {obra_id} - Semana {semana_selecionada}**")
+                            st.markdown(f"**Editando: Obra {obra_id_display} - Semana {semana_selecionada}**")
                             
                             novo_gasto = st.number_input("Novo Gasto Total (R$)", min_value=0.0, value=gasto_atual, format="%.2f", key="edit_gasto")
                             nova_data = st.date_input("Nova Data de Referência", value=data_atual, key="edit_data")
@@ -533,7 +537,6 @@ def load_users():
     try:
         planilha = gc.open(PLANILHA_NOME)
         aba_usuarios = planilha.worksheet(ABA_USUARIOS)
-        # Usa get_records_safe para lidar com possíveis duplicatas/erros na aba Usuarios
         df_users = get_records_safe(aba_usuarios) 
 
         if df_users.empty:
@@ -551,7 +554,7 @@ def load_users():
                 'name': row['name'],
                 'password': row['password'] 
             }
-            for index, row in df_users.iterrows()
+            for index, row in df_users.iterrows() if row['username'].strip() and row['password'].strip()
         }
         return usernames_dict
         
@@ -574,6 +577,9 @@ def show_consulta_dados(df_info, df_despesas):
     cols_to_display = ['Obra_ID', 'Nome_Obra', 'Valor_Total_Inicial', 'Gasto_Total_Acumulado', 'Sobrando_Financeiro', 'Data_Inicio']
     df_display = df_final[[col for col in cols_to_display if col in df_final.columns]].copy()
 
+    # Formata o Obra_ID para exibição
+    if 'Obra_ID' in df_display.columns: 
+        df_display['Obra_ID'] = df_display['Obra_ID'].apply(lambda x: f"{int(x):03d}" if x > 0 else '000')
     if 'Valor_Total_Inicial' in df_display.columns: 
         df_display['Valor_Total_Inicial'] = df_display['Valor_Total_Inicial'].apply(formatar_moeda)
     if 'Gasto_Total_Acumulado' in df_display.columns: 
@@ -591,8 +597,9 @@ def show_relatorio_obra(df_info, df_despesas):
         st.info("Nenhuma obra cadastrada para gerar relatório.")
         return
 
-    opcoes_obras = {f"{row['Nome_Obra']} ({row['Obra_ID']})": row['Obra_ID']
-                    for index, row in df_info.iterrows() if row['Obra_ID'].strip()}
+    # ID é tratado como INT, mas exibido como string formatada
+    opcoes_obras = {f"{row['Nome_Obra']} ({row['Obra_ID']:03d})": row['Obra_ID']
+                    for index, row in df_info.iterrows() if row['Obra_ID'] > 0}
 
     if not opcoes_obras:
          st.warning("Nenhuma obra com ID válido para gerar relatório.")
@@ -601,13 +608,16 @@ def show_relatorio_obra(df_info, df_despesas):
     obra_selecionada_str = st.selectbox("Selecione a Obra para Relatório:", list(opcoes_obras.keys()), key="select_obra_relatorio")
 
     if obra_selecionada_str:
-        obra_id = opcoes_obras[obra_selecionada_str]
+        obra_id = opcoes_obras[obra_selecionada_str] # Obra_ID é int
+        obra_id_display = f"{obra_id:03d}"
+        
         df_status = calcular_status_financeiro(df_info, df_despesas)
         
         info_obra = df_status[df_status['Obra_ID'] == obra_id].iloc[0]
         
+        # Filtro robusto (Obra_ID como INT)
         if not df_despesas.empty and 'Obra_ID' in df_despesas.columns:
-            despesas_obra = df_despesas[df_despesas['Obra_ID'].astype(str) == str(obra_id)].copy()
+            despesas_obra = df_despesas[df_despesas['Obra_ID'].astype(int) == int(obra_id)].copy()
         else:
             despesas_obra = pd.DataFrame()
         
@@ -617,10 +627,10 @@ def show_relatorio_obra(df_info, df_despesas):
         col_det1, col_det2 = st.columns(2)
         
         with col_det1:
-            st.metric("ID da Obra", info_obra.get('Obra_ID', 'N/A'))
+            st.metric("ID da Obra", obra_id_display)
             
             data_inicio_obj = info_obra.get('Data_Inicio')
-            data_inicio_str = data_inicio_obj.strftime('%d/%m/%Y') if pd.notna(data_inicio_obj) and isinstance(data_inicio_obj, datetime) else "N/A"
+            data_inicio_str = data_inicio_obj.strftime('%d/%m/%m%Y') if pd.notna(data_inicio_obj) and isinstance(data_inicio_obj, datetime) else "N/A"
             st.metric("Data de Início", data_inicio_str)
             
         with col_det2:
@@ -657,10 +667,6 @@ def get_authenticator():
     if not usernames_dict:
         return None, None, None
 
-    # CORREÇÃO CRÍTICA 3: Retirada de generate_hashes() da função de login.
-    # O hash JÁ DEVE ESTAR NA PLANILHA e não no secrets.toml.
-    
-    # Esta é a estrutura esperada pelo stauth.Authenticate.
     config_data = {
         'credentials': {
             'usernames': usernames_dict
