@@ -96,8 +96,11 @@ def load_data():
 
 # --- Funções de Escrita de Dados (INSERT E UPDATE) ---
 
-def insert_new_obra(gc, data):
+def insert_new_obra(data):
     """Insere uma nova obra na aba Obras_Info, como número inteiro."""
+    gc = get_gspread_client() # Obtém o cliente GSpread aqui
+    if not gc: return 
+    
     try:
         planilha = gc.open(PLANILHA_NOME)
         aba_info = planilha.worksheet(ABA_INFO)
@@ -105,17 +108,18 @@ def insert_new_obra(gc, data):
         # O ID é passado como INT para que o Sheets o salve como NÚMERO
         data[0] = int(data[0]) 
         
-        # CORREÇÃO: Removido 'raw=False'
         aba_info.append_row(data, insert_data_option='INSERT_ROWS')
         
         st.toast("✅ Nova obra cadastrada com sucesso!")
         load_data.clear()
     except Exception as e:
-        # Apresenta o erro específico
         st.error(f"Erro ao inserir nova obra: {e}")
 
-def update_obra_info(gc, obra_id, new_nome, new_valor, new_data_inicio):
+def update_obra_info(obra_id, new_nome, new_valor, new_data_inicio):
     """Atualiza a obra buscando o ID como número inteiro no Sheets."""
+    gc = get_gspread_client() # Obtém o cliente GSpread aqui
+    if not gc: return 
+    
     try:
         planilha = gc.open(PLANILHA_NOME)
         aba_info = planilha.worksheet(ABA_INFO)
@@ -152,7 +156,6 @@ def update_obra_info(gc, obra_id, new_nome, new_valor, new_data_inicio):
         
         # O intervalo é da coluna A até a D (assumindo 4 colunas)
         range_to_update = f'A{sheets_row_index}:D{sheets_row_index}'
-        # Apenas passamos a lista de listas, sem value_input_option se não for estritamente necessário.
         aba_info.update(range_to_update, [new_row_data]) 
         
         st.toast(f"✅ Obra {obra_id} ({new_nome}) atualizada com sucesso!")
@@ -162,8 +165,11 @@ def update_obra_info(gc, obra_id, new_nome, new_valor, new_data_inicio):
         st.error(f"Erro ao atualizar obra: {e}. Verifique se a coluna 'Obra_ID' é a primeira coluna na aba 'Obras_Info'.")
 
 
-def insert_new_despesa(gc, data):
+def insert_new_despesa(data):
     """Insere uma nova despesa semanal na aba Despesas_Semanas."""
+    gc = get_gspread_client() # Obtém o cliente GSpread aqui
+    if not gc: return
+    
     try:
         planilha = gc.open(PLANILHA_NOME)
         aba_despesas = planilha.worksheet(ABA_DESPESAS)
@@ -171,16 +177,17 @@ def insert_new_despesa(gc, data):
         # O ID de obra deve ser INT para salvar corretamente no Sheets
         data_nativa = [int(data[0]), int(data[1]), data[2], float(data[3])]
 
-        # CORREÇÃO: Removido 'raw=False'
         aba_despesas.append_row(data_nativa, insert_data_option='INSERT_ROWS')
         st.toast("✅ Despesa semanal registrada com sucesso!")
         load_data.clear()
     except Exception as e:
-        # Apresenta o erro específico
         st.error(f"Erro ao registrar despesa: {e}")
 
-def update_despesa(gc, obra_id, semana_ref, novo_gasto, nova_data):
+def update_despesa(obra_id, semana_ref, novo_gasto, nova_data):
     """Atualiza o gasto e a data de uma semana de referência específica."""
+    gc = get_gspread_client() # Obtém o cliente GSpread aqui
+    if not gc: return
+    
     try:
         planilha = gc.open(PLANILHA_NOME)
         aba_despesas = planilha.worksheet(ABA_DESPESAS)
@@ -233,11 +240,14 @@ def calcular_status_financeiro(df_info, df_despesas):
         df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce').fillna(0)
         
         try:
+            # CORREÇÃO: Trata o KeyError no groupby, garantindo que o DataFrame tenha as colunas
             gastos_totais = df_despesas.groupby('Obra_ID')['Gasto_Semana'].sum().reset_index()
             gastos_totais.rename(columns={'Gasto_Semana': 'Gasto_Total_Acumulado'}, inplace=True)
         except:
+             # Se der erro (ex: DataFrame vazio ou coluna com tipo errado), cria um DataFrame vazio
             gastos_totais = pd.DataFrame({'Obra_ID': df_info['Obra_ID'].unique(), 'Gasto_Total_Acumulado': 0.0})
     else:
+        # Retorna um DataFrame zerado se df_despesas estiver vazio
         gastos_totais = pd.DataFrame({'Obra_ID': df_info['Obra_ID'].unique(), 'Gasto_Total_Acumulado': 0.0})
 
     df_final = df_info.merge(gastos_totais, on='Obra_ID', how='left').fillna(0)
@@ -249,7 +259,8 @@ def calcular_status_financeiro(df_info, df_despesas):
 
 # --- Funções das "Páginas" ---
 
-def show_cadastro_obra(gc, df_info):
+# CORREÇÃO: Removido o argumento 'gc'
+def show_cadastro_obra(df_info): 
     st.title(PAGINAS_REVERSO["CADASTRO"])
 
     col_new, col_edit = st.columns(2)
@@ -281,7 +292,7 @@ def show_cadastro_obra(gc, df_info):
                 if nome and valor > 0:
                     # Passa o ID como o número inteiro
                     data_list = [next_id, nome, valor, data_inicio.strftime('%Y-%m-%d')]
-                    insert_new_obra(gc, data_list)
+                    insert_new_obra(data_list) # Chamada Corrigida
                 else:
                     st.warning("Preencha todos os campos corretamente.")
 
@@ -296,8 +307,8 @@ def show_cadastro_obra(gc, df_info):
                             for index, row in df_info.iterrows()}
             
             obra_selecionada_str = st.selectbox("Selecione a Obra para Editar:", 
-                                                list(opcoes_obras.keys()), 
-                                                key="select_obra_edicao")
+                                                 list(opcoes_obras.keys()), 
+                                                 key="select_obra_edicao")
 
             if obra_selecionada_str:
                 obra_id_para_editar = opcoes_obras[obra_selecionada_str]
@@ -327,12 +338,13 @@ def show_cadastro_obra(gc, df_info):
                     
                     if submitted_edit:
                         if novo_nome and novo_valor >= 0:
-                            update_obra_info(gc, obra_id_para_editar, novo_nome, novo_valor, nova_data_inicio)
+                            update_obra_info(obra_id_para_editar, novo_nome, novo_valor, nova_data_inicio) # Chamada Corrigida
                         else:
                             st.warning("Preencha o nome e um valor inicial válido.")
 
 
-def show_registro_despesa(gc, df_info, df_despesas):
+# CORREÇÃO: Removido o argumento 'gc'
+def show_registro_despesa(df_info, df_despesas):
     st.title(PAGINAS_REVERSO["REGISTRO_DESPESA"])
 
     if df_info.empty:
@@ -347,6 +359,7 @@ def show_registro_despesa(gc, df_info, df_despesas):
     if obra_selecionada_str:
         obra_id = opcoes_obras[obra_selecionada_str]
         
+        # Lógica de proteção contra KeyErrors em DataFrames vazios
         if df_despesas.empty or 'Obra_ID' not in df_despesas.columns or 'Semana_Ref' not in df_despesas.columns:
             despesas_obra = pd.DataFrame()
         else:
@@ -372,9 +385,8 @@ def show_registro_despesa(gc, df_info, df_despesas):
                 
                 if submitted:
                     if gasto > 0:
-                        # O ID está como string '1', '2', etc.
                         data_list = [obra_id, proxima_semana, data_semana.strftime('%Y-%m-%d'), gasto]
-                        insert_new_despesa(gc, data_list)
+                        insert_new_despesa(data_list) # Chamada Corrigida
                     else:
                         st.warning("O valor do gasto deve ser maior que R$ 0,00.")
 
@@ -415,20 +427,25 @@ def show_registro_despesa(gc, df_info, df_despesas):
                             
                             if submitted_edit:
                                 if novo_gasto >= 0:
-                                    update_despesa(gc, obra_id, semana_selecionada, novo_gasto, nova_data)
+                                    update_despesa(obra_id, semana_selecionada, novo_gasto, nova_data) # Chamada Corrigida
                                 else:
                                     st.warning("O valor do gasto não pode ser negativo.")
                             
-                    st.markdown("---")
-                    st.markdown("**Histórico de Gastos:**")
-                    st.dataframe(
-                        despesas_display[['Semana', 'Data Ref.', 'Gasto', 'Obra_ID']], 
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                        st.markdown("---")
+                        st.markdown("**Histórico de Gastos:**")
+                        st.dataframe(
+                            despesas_display[['Semana', 'Data Ref.', 'Gasto', 'Obra_ID']], 
+                            use_container_width=True,
+                            hide_index=True
+                        )
+
 @st.cache_data(ttl=3600) # Cache para a lista de usuários
-def load_users(gc):
+def load_users():
     """Carrega usuários e hashes de senha da aba 'Usuarios'."""
+    gc = get_gspread_client()
+    if not gc:
+        return None
+    
     try:
         planilha = gc.open(PLANILHA_NOME)
         aba_usuarios = planilha.worksheet("Usuarios")
@@ -483,7 +500,8 @@ def show_consulta_dados(df_info, df_despesas):
     st.dataframe(df_display, use_container_width=True)
 
 
-def show_relatorio_obra(gc, df_info, df_despesas):
+# CORREÇÃO: Removido o argumento 'gc'
+def show_relatorio_obra(df_info, df_despesas):
     st.title(PAGINAS_REVERSO["RELATORIO"])
 
     if df_info.empty:
@@ -504,10 +522,6 @@ def show_relatorio_obra(gc, df_info, df_despesas):
         
         st.markdown("---")
         st.subheader(f"Relatório de Acompanhamento: {info_obra['Nome_Obra']}")
-        
-        #st.markdown("""
-        #**DICA PARA PDF/IMPRESSÃO:** Use a função de impressão do seu navegador (Ctrl+P ou Cmd+P) e escolha 'Salvar como PDF' para gerar o documento.
-        #""")
         
         col_det1, col_det2 = st.columns(2)
         
@@ -543,11 +557,8 @@ def show_relatorio_obra(gc, df_info, df_despesas):
 
 def get_authenticator():
     """Configura e retorna o objeto Authenticator LENDO DO SHEETS."""
-    gc = get_gspread_client()
-    if not gc:
-        return None, None, None
-        
-    usernames_dict = load_users(gc)
+    
+    usernames_dict = load_users() # Chamada Corrigida: load_users não precisa de gc
     
     if not usernames_dict:
         return None, None, None
@@ -601,35 +612,49 @@ def main():
     st.set_page_config(page_title="Controle Financeiro de Obras", layout="wide")
     st.title("🚧 Sistema de Gerenciamento de Obras")
     
-    # 1. Inicializar o estado da sessão (se não estiver definido)
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = PAGINAS["1. Cadastrar Nova Obra"]
+    # Lógica de Autenticação
+    authenticator, usernames, names = get_authenticator()
     
-    st.markdown("---")
-    
-    # 2. Configurar e mostrar os botões de navegação
-    setup_navigation()
-    
-    st.markdown("---")
-
-    gc = get_gspread_client()
-    if not gc:
-        st.error("Falha na conexão com o Google Sheets. Verifique a autenticação.")
-        st.stop()
+    if not authenticator:
+        st.stop() # Interrompe se a autenticação falhar (por exemplo, aba 'Usuarios' vazia)
         
-    df_info, df_despesas = load_data()
-    
-    # 3. Lógica principal para exibir a página correta
-    current_page = st.session_state.current_page
+    name, authentication_status, username = authenticator.login('Login', 'main')
 
-    if current_page == "CADASTRO":
-        show_cadastro_obra(gc, df_info)
-    elif current_page == "REGISTRO_DESPESA":
-        show_registro_despesa(gc, df_info, df_despesas)
-    elif current_page == "CONSULTA_STATUS":
-        show_consulta_dados(df_info, df_despesas)
-    elif current_page == "RELATORIO":
-        show_relatorio_obra(gc, df_info, df_despesas)
+    if authentication_status:
+        # Usuário autenticado
+        authenticator.logout('Logout', 'sidebar')
+        st.sidebar.write(f'Bem-vindo(a), {name}')
+        
+        # 1. Inicializar o estado da sessão (se não estiver definido)
+        if 'current_page' not in st.session_state:
+            st.session_state.current_page = PAGINAS["1. Cadastrar Nova Obra"]
+        
+        st.markdown("---")
+        
+        # 2. Configurar e mostrar os botões de navegação
+        setup_navigation()
+        
+        st.markdown("---")
+
+        # Não precisamos mais do 'gc' aqui, pois ele é obtido dentro das funções de leitura/escrita
+        df_info, df_despesas = load_data()
+        
+        # 3. Lógica principal para exibir a página correta
+        current_page = st.session_state.current_page
+
+        if current_page == "CADASTRO":
+            show_cadastro_obra(df_info) # Chamada Corrigida
+        elif current_page == "REGISTRO_DESPESA":
+            show_registro_despesa(df_info, df_despesas) # Chamada Corrigida
+        elif current_page == "CONSULTA_STATUS":
+            show_consulta_dados(df_info, df_despesas)
+        elif current_page == "RELATORIO":
+            show_relatorio_obra(df_info, df_despesas) # Chamada Corrigida
+
+    elif authentication_status == False:
+        st.error('Nome de usuário/senha incorretos.')
+    elif authentication_status == None:
+        st.info('Por favor, insira suas credenciais.')
 
 if __name__ == "__main__":
     main()
