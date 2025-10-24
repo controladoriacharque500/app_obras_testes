@@ -10,7 +10,7 @@ import yaml
 from yaml.loader import SafeLoader
 
 # --- Configurações da Nova Planilha ---
-PLANILHA_NOME = "Controle_Obras" # O nome da sua nova planilha
+PLANILHA_NOME = "Controle_Obras_testes" # O nome da sua nova planilha
 ABA_INFO = "Obras_Info"
 ABA_DESPESAS = "Despesas_Semanas"
 
@@ -62,39 +62,27 @@ def load_data():
     try:
         planilha = gc.open(PLANILHA_NOME)
 
-        # Usamos try/except para garantir que o DF não quebre a app se estiver vazio/mal-formatado
-        try:
-             aba_info = planilha.worksheet(ABA_INFO)
-             # get_all_records() ignora a primeira linha se não tiver dados ou se for o cabeçalho
-             df_info = pd.DataFrame(aba_info.get_all_records())
-        except Exception:
-             df_info = pd.DataFrame() # Cria DF vazio se a leitura falhar
+        aba_info = planilha.worksheet(ABA_INFO)
+        df_info = pd.DataFrame(aba_info.get_all_records())
 
-        try:
-             aba_despesas = planilha.worksheet(ABA_DESPESAS)
-             df_despesas = pd.DataFrame(aba_despesas.get_all_records())
-        except Exception:
-             df_despesas = pd.DataFrame() # Cria DF vazio se a leitura falhar
+        aba_despesas = planilha.worksheet(ABA_DESPESAS)
+        df_despesas = pd.DataFrame(aba_despesas.get_all_records())
 
-        # --- Limpeza e Conversão de Tipos (ROBUSTA) ---
-        
+        # Limpeza e Conversão de Tipos (Checa se a coluna existe antes de tentar converter)
         if not df_info.empty:
-            for col in ['Obra_ID', 'Valor_Total_Inicial', 'Data_Inicio']:
-                if col not in df_info.columns:
-                    df_info[col] = None # Adiciona coluna se ausente
-            
-            df_info['Obra_ID'] = pd.to_numeric(df_info['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
-            df_info['Valor_Total_Inicial'] = pd.to_numeric(df_info['Valor_Total_Inicial'], errors='coerce').fillna(0.0)
-            df_info['Data_Inicio'] = pd.to_datetime(df_info['Data_Inicio'], errors='coerce')
+            if 'Obra_ID' in df_info.columns: 
+                 # Converte para INT e depois para STR (ex: 1 -> '1')
+                 df_info['Obra_ID'] = pd.to_numeric(df_info['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
+            if 'Valor_Total_Inicial' in df_info.columns: df_info['Valor_Total_Inicial'] = pd.to_numeric(df_info['Valor_Total_Inicial'], errors='coerce')
+            if 'Data_Inicio' in df_info.columns: df_info['Data_Inicio'] = pd.to_datetime(df_info['Data_Inicio'], errors='coerce')
 
         if not df_despesas.empty:
-            for col in ['Obra_ID', 'Semana_Ref', 'Gasto_Semana']:
-                if col not in df_despesas.columns:
-                    df_despesas[col] = None
-            
-            df_despesas['Obra_ID'] = pd.to_numeric(df_despesas['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
-            df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce').fillna(0.0)
-            df_despesas['Semana_Ref'] = pd.to_numeric(df_despesas['Semana_Ref'], errors='coerce').fillna(0).astype(int)
+            if 'Obra_ID' in df_despesas.columns: 
+                # Converte para INT e depois para STR (ex: 1 -> '1')
+                df_despesas['Obra_ID'] = pd.to_numeric(df_despesas['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
+            if 'Gasto_Semana' in df_despesas.columns: df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce')
+            if 'Semana_Ref' in df_despesas.columns:
+                 df_despesas['Semana_Ref'] = pd.to_numeric(df_despesas['Semana_Ref'], errors='coerce').fillna(0).astype(int)
 
         return df_info, df_despesas
 
@@ -357,7 +345,6 @@ def show_registro_despesa(gc, df_info, df_despesas):
     obra_selecionada_str = st.selectbox("Selecione a Obra:", list(opcoes_obras.keys()), key="select_obra_registro")
 
     if obra_selecionada_str:
-        # CORREÇÃO DA ULTIMA INTERAÇÃO: Certificado de que é 'opcoes_obras'
         obra_id = opcoes_obras[obra_selecionada_str]
         
         if df_despesas.empty or 'Obra_ID' not in df_despesas.columns or 'Semana_Ref' not in df_despesas.columns:
@@ -439,7 +426,42 @@ def show_registro_despesa(gc, df_info, df_despesas):
                         use_container_width=True,
                         hide_index=True
                     )
+@st.cache_data(ttl=3600) # Cache para a lista de usuários
+def load_users(gc):
+    """Carrega usuários e hashes de senha da aba 'Usuarios'."""
+    try:
+        planilha = gc.open(PLANILHA_NOME)
+        aba_usuarios = planilha.worksheet("Usuarios")
+        df_users = pd.DataFrame(aba_usuarios.get_all_records())
 
+        if df_users.empty:
+            st.error("A aba 'Usuarios' está vazia ou não foi encontrada. Autenticação desabilitada.")
+            return None
+        
+        # Garante que as colunas necessárias estão presentes
+        required_cols = ['name', 'username', 'password']
+        if not all(col in df_users.columns for col in required_cols):
+             st.error(f"A aba 'Usuarios' deve conter as colunas: {required_cols}")
+             return None
+
+        # Formata os dados para o stauth, usando as senhas JÁ HASHED da planilha
+        usernames_dict = {
+            row['username']: {
+                'email': f"{row['username']}@app.com",
+                'name': row['name'],
+                # A senha LIDA AQUI DEVE SER O HASH GERADO NO PASSO 2
+                'password': row['password'] 
+            }
+            for index, row in df_users.iterrows()
+        }
+        return usernames_dict
+        
+    except WorksheetNotFound:
+        st.error("Erro: Aba 'Usuarios' não encontrada na planilha. Crie a aba.")
+        return None
+    except Exception as e:
+        st.error(f"Erro ao carregar usuários: {e}")
+        return None
 
 def show_consulta_dados(df_info, df_despesas):
     st.title(PAGINAS_REVERSO["CONSULTA_STATUS"])
@@ -483,9 +505,9 @@ def show_relatorio_obra(gc, df_info, df_despesas):
         st.markdown("---")
         st.subheader(f"Relatório de Acompanhamento: {info_obra['Nome_Obra']}")
         
-        st.markdown("""
-        **DICA PARA PDF/IMPRESSÃO:** Use a função de impressão do seu navegador (Ctrl+P ou Cmd+P) e escolha 'Salvar como PDF' para gerar o documento.
-        """)
+        #st.markdown("""
+        #**DICA PARA PDF/IMPRESSÃO:** Use a função de impressão do seu navegador (Ctrl+P ou Cmd+P) e escolha 'Salvar como PDF' para gerar o documento.
+        #""")
         
         col_det1, col_det2 = st.columns(2)
         
@@ -501,6 +523,45 @@ def show_relatorio_obra(gc, df_info, df_despesas):
         
         st.markdown("---")
         st.markdown("#### Histórico de Despesas Semanais")
+
+        # --- Lógica de Autenticação (MODIFICADA) ---
+
+def get_authenticator():
+    """Configura e retorna o objeto Authenticator LENDO DO SHEETS."""
+    gc = get_gspread_client()
+    if not gc:
+        return None, None, None
+        
+    usernames_dict = load_users(gc)
+    
+    if not usernames_dict:
+        return None, None, None
+
+    # NOVO: Formata os dados para o stauth, que agora contém as senhas hashed do Sheets
+    config_data = {
+        'credentials': {
+            'usernames': usernames_dict
+        },
+        'cookie': {
+            # Manter as informações do secrets.toml para cookie
+            'name': st.secrets['credentials']['cookie_name'],
+            'key': st.secrets['credentials']['cookie_key'],
+            'expiry_days': st.secrets['credentials']['cookie_expiry_days']
+        },
+        'preauthorized': {
+            'emails': []
+        }
+    }
+    
+    authenticator = stauth.Authenticate(
+        config_data['credentials'],
+        config_data['cookie']['name'],
+        config_data['cookie']['key'],
+        config_data['cookie']['expiry_days']
+    )
+    
+    # Retorna o autenticador e as listas de nomes de usuário e nomes reais
+    return authenticator, list(usernames_dict.keys()), [d['name'] for d in usernames_dict.values()]
         
         if despesas_obra.empty:
             st.info("Nenhum registro de despesa semanal encontrado para esta obra.")
@@ -534,135 +595,41 @@ def setup_navigation():
                 pass
 
 
-# --- Lógica de Autenticação ---
-
-def get_authenticator():
-    """Configura e retorna o objeto Authenticator."""
-    
-    # Tenta carregar as credenciais (que devem estar no st.secrets)
-    if "credentials" not in st.secrets:
-        st.error("Seção [credentials] não encontrada no secrets.toml. A autenticação não funcionará.")
-        return None, None, None
-
-    # NOVO: Formata as credenciais do secrets.toml para o formato YAML
-    config_data = {
-        'credentials': {
-            'usernames': {
-                st.secrets['credentials']['usernames'][i]: {
-                    'email': f"{st.secrets['credentials']['usernames'][i]}@app.com",
-                    'name': st.secrets['credentials']['names'][i],
-                    # A senha deve ser criptografada (hashed)
-                    'password': stauth.Hasher([st.secrets['credentials']['passwords'][i]]).generate_hashes()[0] 
-                } 
-                for i in range(len(st.secrets['credentials']['usernames']))
-            }
-        },
-        'cookie': {
-            'name': st.secrets['credentials']['cookie_name'],
-            'key': st.secrets['credentials']['cookie_key'],
-            'expiry_days': st.secrets['credentials']['cookie_expiry_days']
-        },
-        'preauthorized': {
-            'emails': []
-        }
-    }
-    
-    # ATENÇÃO: Esta é uma forma simples de demonstrar o uso.
-    # Em um ambiente real, você deve usar st.secrets para carregar as credenciais JÁ CRIPTOGRAFADAS.
-    # Aqui, a senha é criptografada a cada execução, o que é menos performático, mas funciona para este caso.
-    
-    # Para persistir as senhas criptografadas, você pode criar um arquivo config.yaml localmente,
-    # rodar o código uma vez (ele vai mostrar o hash no terminal), copiar o hash e colocá-lo no config.yaml.
-    
-    # No entanto, a forma mais fácil e segura é usar diretamente o st.secrets
-    # e colocar as senhas criptografadas (hashes) lá, em vez das senhas em texto puro.
-    
-    # Se você quiser simplificar para fins de demonstração, use a lógica acima com as senhas em texto puro
-    # NO ST.SECRETS.
-    
-    # Criar o objeto authenticator
-    authenticator = stauth.Authenticate(
-        config_data['credentials'],
-        config_data['cookie']['name'],
-        config_data['cookie']['key'],
-        config_data['cookie']['expiry_days']
-    )
-    
-    return authenticator, config_data['credentials']['usernames'], config_data['credentials']['usernames']
-
-
 # --- Aplicação Principal ---
 
 def main():
     st.set_page_config(page_title="Controle Financeiro de Obras", layout="wide")
+    st.title("🚧 Sistema de Gerenciamento de Obras")
     
-    # --- 0. Configurar Autenticação ---
-    authenticator, usernames, names = get_authenticator()
+    # 1. Inicializar o estado da sessão (se não estiver definido)
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = PAGINAS["1. Cadastrar Nova Obra"]
     
-    if not authenticator:
+    st.markdown("---")
+    
+    # 2. Configurar e mostrar os botões de navegação
+    setup_navigation()
+    
+    st.markdown("---")
+
+    gc = get_gspread_client()
+    if not gc:
+        st.error("Falha na conexão com o Google Sheets. Verifique a autenticação.")
         st.stop()
         
-    # Tenta fazer o login
-    name, authentication_status, username = authenticator.login('Login', 'main')
+    df_info, df_despesas = load_data()
     
-    st.session_state.authentication_status = authentication_status
-    st.session_state.username = username
-    st.session_state.name = name
+    # 3. Lógica principal para exibir a página correta
+    current_page = st.session_state.current_page
 
-    # --- 1. Lógica de Login ---
-    if st.session_state["authentication_status"]:
-        # Se autenticado com sucesso
-        
-        # Cria o botão de Logout no topo
-        authenticator.logout('Sair', 'sidebar') 
-        
-        st.sidebar.title(f"Bem-vindo, {st.session_state['name']}!")
-        
-        st.title("🚧 Sistema de Gerenciamento de Obras")
-        
-        # 2. Inicializar o estado da sessão (se não estiver definido)
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = PAGINAS["1. Cadastrar Nova Obra"]
-        
-        st.markdown("---")
-        
-        # 3. Configurar e mostrar os botões de navegação
-        setup_navigation()
-        
-        st.markdown("---")
-
-        gc = get_gspread_client()
-        if not gc:
-            st.error("Falha na conexão com o Google Sheets. Verifique a autenticação.")
-            st.stop()
-            
-        df_info, df_despesas = load_data()
-        
-        # 4. Lógica principal para exibir a página correta
-        current_page = st.session_state.current_page
-
-        if current_page == "CADASTRO":
-            # Exemplo de controle de acesso: Apenas 'admin' pode cadastrar/editar obra
-            if st.session_state["username"] == "admin":
-                 show_cadastro_obra(gc, df_info)
-            else:
-                 st.warning("Você não tem permissão para Cadastrar ou Editar Obras.")
-                 
-        elif current_page == "REGISTRO_DESPESA":
-            show_registro_despesa(gc, df_info, df_despesas)
-            
-        elif current_page == "CONSULTA_STATUS":
-            show_consulta_dados(df_info, df_despesas)
-            
-        elif current_page == "RELATORIO":
-            show_relatorio_obra(gc, df_info, df_despesas)
-
-    elif st.session_state["authentication_status"] is False:
-        # Se falhou
-        st.error('Nome de usuário/senha incorretos')
-    elif st.session_state["authentication_status"] is None:
-        # Se ainda não tentou
-        st.warning('Por favor, insira seu nome de usuário e senha.')
+    if current_page == "CADASTRO":
+        show_cadastro_obra(gc, df_info)
+    elif current_page == "REGISTRO_DESPESA":
+        show_registro_despesa(gc, df_info, df_despesas)
+    elif current_page == "CONSULTA_STATUS":
+        show_consulta_dados(df_info, df_despesas)
+    elif current_page == "RELATORIO":
+        show_relatorio_obra(gc, df_info, df_despesas)
 
 if __name__ == "__main__":
     main()
