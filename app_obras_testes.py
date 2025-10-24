@@ -524,7 +524,22 @@ def show_relatorio_obra(gc, df_info, df_despesas):
         st.markdown("---")
         st.markdown("#### Histórico de Despesas Semanais")
 
-        # --- Lógica de Autenticação (MODIFICADA) ---
+        
+        
+        if despesas_obra.empty:
+            st.info("Nenhum registro de despesa semanal encontrado para esta obra.")
+        else:
+            despesas_display = despesas_obra.sort_values('Semana_Ref', ascending=True).copy()
+            despesas_display['Gasto_Semana'] = despesas_display['Gasto_Semana'].apply(formatar_moeda)
+            despesas_display['Data_Semana'] = pd.to_datetime(despesas_display['Data_Semana']).dt.strftime('%d/%m/%Y')
+            
+            df_relatorio = despesas_display[['Semana_Ref', 'Data_Semana', 'Gasto_Semana']].rename(columns={
+                'Semana_Ref': 'Semana', 'Data_Semana': 'Data Referência', 'Gasto_Semana': 'Gasto da Semana'
+            })
+
+            st.dataframe(df_relatorio, use_container_width=True, hide_index=True)
+
+# --- Lógica de Autenticação (MODIFICADA) ---
 
 def get_authenticator():
     """Configura e retorna o objeto Authenticator LENDO DO SHEETS."""
@@ -562,21 +577,6 @@ def get_authenticator():
     
     # Retorna o autenticador e as listas de nomes de usuário e nomes reais
     return authenticator, list(usernames_dict.keys()), [d['name'] for d in usernames_dict.values()]
-        
-        if despesas_obra.empty:
-            st.info("Nenhum registro de despesa semanal encontrado para esta obra.")
-        else:
-            despesas_display = despesas_obra.sort_values('Semana_Ref', ascending=True).copy()
-            despesas_display['Gasto_Semana'] = despesas_display['Gasto_Semana'].apply(formatar_moeda)
-            despesas_display['Data_Semana'] = pd.to_datetime(despesas_display['Data_Semana']).dt.strftime('%d/%m/%Y')
-            
-            df_relatorio = despesas_display[['Semana_Ref', 'Data_Semana', 'Gasto_Semana']].rename(columns={
-                'Semana_Ref': 'Semana', 'Data_Semana': 'Data Referência', 'Gasto_Semana': 'Gasto da Semana'
-            })
-
-            st.dataframe(df_relatorio, use_container_width=True, hide_index=True)
-
-
 # --- Funções de Navegação e Layout ---
 
 def navigate_to(page_key):
