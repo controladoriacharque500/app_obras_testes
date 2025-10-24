@@ -4,9 +4,9 @@ from gspread import service_account_from_dict
 from datetime import datetime, timedelta
 import json
 from gspread.exceptions import WorksheetNotFound
-import streamlit_authenticator as stauth 
-import yaml
-from yaml.loader import SafeLoader
+# IMPORT REMOVIDO: import streamlit_authenticator as stauth 
+# IMPORT REMOVIDO: import yaml
+# IMPORT REMOVIDO: from yaml.loader import SafeLoader
 import time 
 
 # --- Configurações da Nova Planilha ---
@@ -152,7 +152,7 @@ def insert_new_obra(data):
         planilha = gc.open(PLANILHA_NOME)
         aba_info = planilha.worksheet(ABA_INFO)
         
-        # CORREÇÃO 2: ID é convertido para INT nativo do Python (data[0] vem como int)
+        # ID é convertido para INT nativo do Python (data[0] vem como int)
         data_nativa = [int(data[0]), data[1], float(data[2]), data[3]]
         
         aba_info.append_row(data_nativa, insert_data_option='INSERT_ROWS')
@@ -189,7 +189,7 @@ def update_obra_info(obra_id, new_nome, new_valor, new_data_inicio):
             st.warning(f"Obra ID {obra_id} não encontrada para atualização.")
             return
 
-        # CORREÇÃO 3: ID é enviado como INT nativo do Python
+        # ID é enviado como INT nativo do Python
         new_row_data = [
             id_int_para_buscar, 
             str(new_nome),
@@ -216,7 +216,7 @@ def insert_new_despesa(data):
         planilha = gc.open(PLANILHA_NOME)
         aba_despesas = planilha.worksheet(ABA_DESPESAS)
         
-        # CORREÇÃO 4: Obra_ID (int), Semana_Ref (int), Gasto (float) -> Tipos nativos
+        # Obra_ID (int), Semana_Ref (int), Data (str), Gasto (float) -> Tipos nativos
         data_nativa = [int(data[0]), int(data[1]), data[2], float(data[3])]
 
         aba_despesas.append_row(data_nativa, insert_data_option='INSERT_ROWS')
@@ -255,7 +255,7 @@ def update_despesa(obra_id, semana_ref, novo_gasto, nova_data):
             st.warning("Linha de despesa não encontrada para atualização.")
             return
 
-        # CORREÇÃO 5: ID é enviado como INT nativo do Python
+        # ID é enviado como INT nativo do Python
         new_row_data = [
             id_int_para_buscar, 
             int(semana_ref),
@@ -529,7 +529,7 @@ def show_registro_despesa(df_info, df_despesas):
 
 @st.cache_data(ttl=3600) 
 def load_users():
-    """Carrega usuários e hashes de senha da aba 'Usuarios'."""
+    """Carrega usuários, nomes e senhas (em texto simples) da aba 'Usuarios'."""
     gc = get_gspread_client()
     if not gc:
         return None
@@ -548,11 +548,11 @@ def load_users():
              st.error(f"A aba '{ABA_USUARIOS}' deve conter as colunas: {required_cols}")
              return None
 
+        # Cria o dicionário onde a 'password' é a senha em texto plano (não hash)
         usernames_dict = {
             row['username']: {
-                'email': f"{row['username']}@app.com",
                 'name': row['name'],
-                'password': row['password'] 
+                'password': row['password'] # Lendo a senha como texto simples
             }
             for index, row in df_users.iterrows() if row['username'].strip() and row['password'].strip()
         }
@@ -657,38 +657,6 @@ def show_relatorio_obra(df_info, df_despesas):
 
             st.dataframe(df_relatorio, use_container_width=True, hide_index=True)
 
-# --- Lógica de Autenticação ---
-
-def get_authenticator():
-    """Configura e retorna o objeto Authenticator LENDO DO SHEETS."""
-    
-    usernames_dict = load_users() 
-    
-    if not usernames_dict:
-        return None, None, None
-
-    config_data = {
-        'credentials': {
-            'usernames': usernames_dict
-        },
-        'cookie': {
-            'name': st.secrets['credentials']['cookie_name'],
-            'key': st.secrets['credentials']['cookie_key'],
-            'expiry_days': st.secrets['credentials']['cookie_expiry_days']
-        },
-        'preauthorized': {
-            'emails': []
-        }
-    }
-    
-    authenticator = stauth.Authenticate(
-        config_data['credentials'],
-        config_data['cookie']['name'],
-        config_data['cookie']['key'],
-        config_data['cookie']['expiry_days']
-    )
-    
-    return authenticator, list(usernames_dict.keys()), [d['name'] for d in usernames_dict.values()]
 
 # --- Funções de Navegação e Layout ---
 
@@ -714,23 +682,54 @@ def main():
     st.set_page_config(page_title="Controle Financeiro de Obras", layout="wide")
     st.title("🚧 Sistema de Gerenciamento de Obras")
     
-    # Lógica de Autenticação
-    try:
-        authenticator, usernames, names = get_authenticator()
-    except KeyError as e:
-         st.error(f"Erro de autenticação: Verifique se a seção 'credentials' no secrets.toml está completa (cookie_name, cookie_key, cookie_expiry_days). Detalhe: {e}")
-         return
+    # Inicializa o estado de autenticação se não existir
+    if 'auth_status' not in st.session_state:
+        st.session_state['auth_status'] = False
+        st.session_state['user_name'] = None
     
-    if not authenticator:
+    # Tenta carregar usuários
+    usernames_dict = load_users() 
+    
+    if not usernames_dict:
+        # load_users já mostra o erro.
         return
-        
-    name, authentication_status, username = authenticator.login('Login', 'main')
+    
+    # Lógica de Login Simples na Sidebar (se não estiver autenticado)
+    if not st.session_state['auth_status']:
+        with st.sidebar:
+            st.subheader("Login")
+            user_input = st.text_input("Usuário", key="login_username")
+            pass_input = st.text_input("Senha", type="password", key="login_password")
+            login_button = st.button("Entrar")
 
-    if authentication_status:
+            if login_button:
+                if user_input in usernames_dict:
+                    # Verifica a senha em texto simples (sem hash)
+                    if pass_input == usernames_dict[user_input]['password']:
+                        st.session_state['auth_status'] = True
+                        st.session_state['user_name'] = usernames_dict[user_input]['name']
+                        st.success(f"Bem-vindo(a), {st.session_state['user_name']}!")
+                        # Dá um tempo para a mensagem aparecer e recarrega
+                        time.sleep(0.5) 
+                        st.rerun() 
+                    else:
+                        st.error('Senha incorreta.')
+                else:
+                    st.error('Usuário não encontrado.')
+            
+            st.info('Por favor, faça login para acessar o sistema.')
+
+    # Lógica do Aplicativo (se autenticado)
+    if st.session_state['auth_status']:
         # Usuário autenticado
-        authenticator.logout('Logout', 'sidebar')
-        st.sidebar.write(f'Bem-vindo(a), {name}')
+        with st.sidebar:
+             st.write(f'Bem-vindo(a), {st.session_state["user_name"]}')
+             if st.button("Logout"):
+                 st.session_state['auth_status'] = False
+                 st.session_state['user_name'] = None
+                 st.rerun()
         
+        # Configuração da página inicial
         if 'current_page' not in st.session_state:
             st.session_state.current_page = PAGINAS["1. Cadastrar Nova Obra"]
         
@@ -740,6 +739,7 @@ def main():
         
         st.markdown("---")
 
+        # Carrega dados e exibe a página
         df_info, df_despesas = load_data()
         
         current_page = st.session_state.current_page
@@ -752,11 +752,6 @@ def main():
             show_consulta_dados(df_info, df_despesas)
         elif current_page == "RELATORIO":
             show_relatorio_obra(df_info, df_despesas) 
-
-    elif authentication_status == False:
-        st.error('Nome de usuário/senha incorretos.')
-    elif authentication_status == None:
-        st.info('Por favor, insira suas credenciais.')
 
 if __name__ == "__main__":
     main()
