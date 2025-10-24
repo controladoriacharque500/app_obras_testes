@@ -3,3 +3,4 @@ pandas
 gspread
 streamlit_authenticator
 google-auth
+pyyaml
