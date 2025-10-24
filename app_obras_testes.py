@@ -62,27 +62,39 @@ def load_data():
     try:
         planilha = gc.open(PLANILHA_NOME)
 
-        aba_info = planilha.worksheet(ABA_INFO)
-        df_info = pd.DataFrame(aba_info.get_all_records())
+        # Usamos try/except para garantir que o DF não quebre a app se estiver vazio/mal-formatado
+        try:
+             aba_info = planilha.worksheet(ABA_INFO)
+             # get_all_records() ignora a primeira linha se não tiver dados ou se for o cabeçalho
+             df_info = pd.DataFrame(aba_info.get_all_records())
+        except Exception:
+             df_info = pd.DataFrame() # Cria DF vazio se a leitura falhar
 
-        aba_despesas = planilha.worksheet(ABA_DESPESAS)
-        df_despesas = pd.DataFrame(aba_despesas.get_all_records())
+        try:
+             aba_despesas = planilha.worksheet(ABA_DESPESAS)
+             df_despesas = pd.DataFrame(aba_despesas.get_all_records())
+        except Exception:
+             df_despesas = pd.DataFrame() # Cria DF vazio se a leitura falhar
 
-        # Limpeza e Conversão de Tipos (Checa se a coluna existe antes de tentar converter)
+        # --- Limpeza e Conversão de Tipos (ROBUSTA) ---
+        
         if not df_info.empty:
-            if 'Obra_ID' in df_info.columns: 
-                 # Converte para INT e depois para STR (ex: 1 -> '1')
-                 df_info['Obra_ID'] = pd.to_numeric(df_info['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
-            if 'Valor_Total_Inicial' in df_info.columns: df_info['Valor_Total_Inicial'] = pd.to_numeric(df_info['Valor_Total_Inicial'], errors='coerce')
-            if 'Data_Inicio' in df_info.columns: df_info['Data_Inicio'] = pd.to_datetime(df_info['Data_Inicio'], errors='coerce')
+            for col in ['Obra_ID', 'Valor_Total_Inicial', 'Data_Inicio']:
+                if col not in df_info.columns:
+                    df_info[col] = None # Adiciona coluna se ausente
+            
+            df_info['Obra_ID'] = pd.to_numeric(df_info['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
+            df_info['Valor_Total_Inicial'] = pd.to_numeric(df_info['Valor_Total_Inicial'], errors='coerce').fillna(0.0)
+            df_info['Data_Inicio'] = pd.to_datetime(df_info['Data_Inicio'], errors='coerce')
 
         if not df_despesas.empty:
-            if 'Obra_ID' in df_despesas.columns: 
-                # Converte para INT e depois para STR (ex: 1 -> '1')
-                df_despesas['Obra_ID'] = pd.to_numeric(df_despesas['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
-            if 'Gasto_Semana' in df_despesas.columns: df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce')
-            if 'Semana_Ref' in df_despesas.columns:
-                 df_despesas['Semana_Ref'] = pd.to_numeric(df_despesas['Semana_Ref'], errors='coerce').fillna(0).astype(int)
+            for col in ['Obra_ID', 'Semana_Ref', 'Gasto_Semana']:
+                if col not in df_despesas.columns:
+                    df_despesas[col] = None
+            
+            df_despesas['Obra_ID'] = pd.to_numeric(df_despesas['Obra_ID'], errors='coerce').fillna(0).astype(int).astype(str)
+            df_despesas['Gasto_Semana'] = pd.to_numeric(df_despesas['Gasto_Semana'], errors='coerce').fillna(0.0)
+            df_despesas['Semana_Ref'] = pd.to_numeric(df_despesas['Semana_Ref'], errors='coerce').fillna(0).astype(int)
 
         return df_info, df_despesas
 
